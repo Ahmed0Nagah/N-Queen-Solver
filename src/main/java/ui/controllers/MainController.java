@@ -33,6 +33,7 @@ public class MainController {
     private Task<Void> solveTask;
     private Solver solver = new BacktrackingSolver();
     private AtomicInteger solutionCount = new AtomicInteger(0);
+    private volatile boolean isFinished = false;
 
     @FXML
     public void initialize() {
@@ -61,6 +62,7 @@ public class MainController {
         boolean animate = animateToggle.isSelected();
         double speed = speedSlider.getValue(); // milliseconds delay between steps
 
+        isFinished = false;
         solveTask = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -68,10 +70,10 @@ public class MainController {
                     solver.solve(currentN,
                             cols -> {
                                 // onStep callback — update UI
-                                if (isCancelled()) return;
+                                if (isCancelled() || isFinished) return;
                                 if (animate) {
                                     // show intermediate step with delay
-                                    Platform.runLater(() -> render(cols));
+                                    Platform.runLater(() -> {if (!isFinished) render(cols);});
                                     try { Thread.sleep(Math.max(1, (long) speed)); } catch (InterruptedException ex) { cancel(); }
                                 } else {
                                     // if not animating, only show final states or on solution
@@ -79,6 +81,7 @@ public class MainController {
                                 }
                             },
                             solution -> {
+                                if (!findAll) isFinished = true;
                                 // onSolution callback
                                 int c = solutionCount.incrementAndGet();
                                 Platform.runLater(() -> {
