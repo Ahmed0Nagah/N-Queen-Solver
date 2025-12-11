@@ -21,12 +21,10 @@ public class MainController {
     @FXML private Button solveBtn;
     @FXML private Button stopBtn;
     @FXML private CheckBox findAllCheckbox;
-    @FXML private Slider speedSlider;
     @FXML private ToggleButton animateToggle;
     @FXML private StackPane boardContainer;
     @FXML private Label statusLabel;
     @FXML private Label solutionsLabel;
-    @FXML private Button exportBtn;
 
     private Pane boardGrid; // will contain GridPane
     private int currentN = 8;
@@ -43,7 +41,6 @@ public class MainController {
 
         solveBtn.setOnAction(e -> startSolving());
         stopBtn.setOnAction(e -> stopSolving());
-        exportBtn.setOnAction(e -> exportSolutions());
     }
 
     private void startSolving() {
@@ -56,11 +53,9 @@ public class MainController {
         solutionsLabel.setText("0");
         solveBtn.setDisable(true);
         stopBtn.setDisable(false);
-        exportBtn.setDisable(true);
 
         boolean findAll = findAllCheckbox.isSelected();
         boolean animate = animateToggle.isSelected();
-        double speed = speedSlider.getValue(); // milliseconds delay between steps
 
         isFinished = false;
         solveTask = new Task<>() {
@@ -74,7 +69,7 @@ public class MainController {
                                 if (animate) {
                                     // show intermediate step with delay
                                     Platform.runLater(() -> {if (!isFinished) render(cols);});
-                                    try { Thread.sleep(Math.max(1, (long) speed)); } catch (InterruptedException ex) { cancel(); }
+                                    try { Thread.sleep(100); } catch (InterruptedException ex) { cancel(); }
                                 } else {
                                     // if not animating, only show final states or on solution
                                     Platform.runLater(() -> render(cols));
@@ -104,7 +99,6 @@ public class MainController {
                     statusLabel.setText("Done");
                     solveBtn.setDisable(false);
                     stopBtn.setDisable(true);
-                    exportBtn.setDisable(false);
                 });
             }
 
@@ -114,7 +108,6 @@ public class MainController {
                     statusLabel.setText("Stopped");
                     solveBtn.setDisable(false);
                     stopBtn.setDisable(true);
-                    exportBtn.setDisable(solutionCount.get()==0);
                 });
             }
 
@@ -192,10 +185,5 @@ public class MainController {
                 }
             }
         }
-    }
-
-    private void exportSolutions() {
-        // You can implement export to text file using FileChooser and write solutions.
-        statusLabel.setText("Export not implemented in this sample.");
     }
 }
