@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/N-Queen-Solver.iml" filepath="$PROJECT_DIR$/.idea/N-Queen-Solver.iml" />
+      <module fileurl="file://$PROJECT_DIR$/N-Queen-Solver.iml" filepath="$PROJECT_DIR$/N-Queen-Solver.iml" />
     </modules>
   </component>
 </project>

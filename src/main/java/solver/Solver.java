@@ -15,7 +15,14 @@ public interface Solver {
      * @return list of solutions found (may be large)
      */
     List<Solution> solve(int n,
-                         Consumer<int[]> onStep,
-                         Consumer<Solution> onSolution,
-                         boolean findAll) throws InterruptedException;
+                        Consumer<int[]> onStep,
+                        Consumer<Solution> onSolution,
+                        boolean findAll) throws InterruptedException;
+
+    List<Solution> solve(int n,
+                        Consumer<int[]> onStep,
+                        Consumer<Solution> onSolution,
+                        boolean findAll,
+                        int[] cols,
+                        int i);
 }

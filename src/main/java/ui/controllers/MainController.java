@@ -1,19 +1,32 @@
 package ui.controllers;
 
-import model.Solution;
+import storage.SolutionStore;
 import solver.BacktrackingSolver;
 import solver.Solver;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
-import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.util.Duration;
+import ui.animation.BoardAnimator;
+import worker.ParallelSolverWorker;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * MainController
+ * --------------
+ * JavaFX controller for the N-Queens application.
+ *
+ * Responsibilities:
+ * - Handle user interactions
+ * - Trigger solver execution
+ * - Display board and solutions
+ * - Coordinate animation and UI updates
+ *
+ * Important:
+ * - NO solving logic here
+ * - NO thread management here
+ */
 
 public class MainController {
 
@@ -25,127 +38,151 @@ public class MainController {
     @FXML private StackPane boardContainer;
     @FXML private Label statusLabel;
     @FXML private Label solutionsLabel;
+    @FXML private Slider speedSlider;
+    @FXML private ListView<String> solutionList;
 
     private Pane boardGrid; // will contain GridPane
+    private StackPane[][] cellGrid; // Fast lookup array
     private int currentN = 8;
-    private Task<Void> solveTask;
-    private Solver solver = new BacktrackingSolver();
+    private ParallelSolverWorker parallelSolverWorker;
+    private final Solver solver = new BacktrackingSolver();
     private AtomicInteger solutionCount = new AtomicInteger(0);
-    private volatile boolean isFinished = false;
+    private BoardAnimator animator;
+    private SolutionStore solutionStore;
+
 
     @FXML
     public void initialize() {
         // Spinner for N
-        SpinnerValueFactory<Integer> valFactory = new SpinnerValueFactory.IntegerSpinnerValueFactory(4, 20, 8);
+        SpinnerValueFactory<Integer> valFactory = new SpinnerValueFactory.IntegerSpinnerValueFactory(4, 15, 8);
         nSpinner.setValueFactory(valFactory);
 
         solveBtn.setOnAction(e -> startSolving());
         stopBtn.setOnAction(e -> stopSolving());
+
+        solutionList.getSelectionModel().selectedIndexProperty().addListener(
+                (obs, oldVal, newVal) -> {
+                    int index = newVal.intValue();
+                    if (index >= 0 && index < solutionStore.size()) {
+                        render(solutionStore.get(index).getCols());
+                    }
+                }
+        );
+
+        solutionStore = new SolutionStore();
     }
 
     private void startSolving() {
         currentN = nSpinner.getValue();
+        double speed = this.speedSlider.getValue();
+
         boardContainer.getChildren().clear();
         boardGrid = createBoardGrid(currentN);
         boardContainer.getChildren().add(boardGrid);
+
+        solutionStore.clear();
+        solutionList.getItems().clear();
+
         statusLabel.setText("Solving...");
         solutionCount.set(0);
         solutionsLabel.setText("0");
+
         solveBtn.setDisable(true);
         stopBtn.setDisable(false);
 
         boolean findAll = findAllCheckbox.isSelected();
         boolean animate = animateToggle.isSelected();
 
-        isFinished = false;
-        solveTask = new Task<>() {
-            @Override
-            protected Void call() throws Exception {
-                try {
-                    solver.solve(currentN,
-                            cols -> {
-                                // onStep callback — update UI
-                                if (isCancelled() || isFinished) return;
-                                if (animate) {
-                                    // show intermediate step with delay
-                                    Platform.runLater(() -> {if (!isFinished) render(cols);});
-                                    try { Thread.sleep(100); } catch (InterruptedException ex) { cancel(); }
-                                } else {
-                                    // if not animating, only show final states or on solution
-                                    Platform.runLater(() -> render(cols));
-                                }
-                            },
-                            solution -> {
-                                if (!findAll) isFinished = true;
-                                // onSolution callback
-                                int c = solutionCount.incrementAndGet();
-                                Platform.runLater(() -> {
-                                    solutionsLabel.setText(String.valueOf(c));
-                                    // optionally highlight final solution
-                                    render(solution.getCols());
-                                });
-                            },
-                            findAll
-                    );
-                } catch (InterruptedException ex) {
-                    // task cancelled
-                }
-                return null;
-            }
+        // initialize it every time clicking on solve(Solving the empty board bug)
+        parallelSolverWorker = new ParallelSolverWorker(solver, solutionStore);
 
-            @Override
-            protected void succeeded() {
-                Platform.runLater(() -> {
+        animator = animate
+                ? new BoardAnimator(
+                cols -> Platform.runLater(() -> render(cols)),
+                (int) speed,
+                () -> Platform.runLater(() -> {
+                    solveBtn.setDisable(false);
+                    stopBtn.setDisable(true);
                     statusLabel.setText("Done");
-                    solveBtn.setDisable(false);
-                    stopBtn.setDisable(true);
-                });
-            }
+                })
+        )
+                : null;
 
-            @Override
-            protected void cancelled() {
-                Platform.runLater(() -> {
-                    statusLabel.setText("Stopped");
-                    solveBtn.setDisable(false);
-                    stopBtn.setDisable(true);
-                });
-            }
+        if (animator != null) animator.start();
 
-            @Override
-            protected void failed() {
-                Platform.runLater(() -> {
+        parallelSolverWorker.start(
+                currentN,
+                findAll,
+
+                // onStep
+                cols -> {
+                    if (animator != null) {
+                        // Pass a clone to avoid concurrent modification issues
+                        animator.submit(cols.clone());
+                    }
+                },
+
+                // onSolution
+                solution -> Platform.runLater(() -> {
+                    int c = solutionCount.incrementAndGet();
+                    solutionsLabel.setText(String.valueOf(c));
+
+                    if (animator == null) render(solution.getCols());
+                }),
+
+                // onFinished
+                () -> Platform.runLater(() -> {
+                    solutionList.getItems().clear();
+                    for (int i = 0; i < solutionStore.size(); i++) {
+                        solutionList.getItems().add("Solution #" + (i + 1));
+                    }
+                    statusLabel.setText("Done (Calculation)");
+                    if (animator == null || !animator.isRunning()){
+                        solveBtn.setDisable(false); // Enable solve button
+                        stopBtn.setDisable(true); // Disable stop button
+                    }
+                }),
+
+                // onError
+                ex -> Platform.runLater(() -> {
                     statusLabel.setText("Failed");
+                    if (animator != null) animator.stop();
                     solveBtn.setDisable(false);
-                    stopBtn.setDisable(true);
-                });
-            }
-        };
-
-        Thread th = new Thread(solveTask, "solver-thread");
-        th.setDaemon(true);
-        th.start();
+                    stopBtn.setDisable(true); // Disable stop button
+                    ex.printStackTrace();
+                })
+        );
     }
+
 
     private void stopSolving() {
-        if (solveTask != null && !solveTask.isCancelled()) {
-            solveTask.cancel(true);
-        }
+        parallelSolverWorker.cancel();
+        statusLabel.setText("Stopped");
+        if (animator != null) animator.stop();
+        solveBtn.setDisable(false);
+        stopBtn.setDisable(true);
     }
+
 
     private Pane createBoardGrid(int n) {
         GridPane grid = new GridPane();
-        double size = Math.min(600, 600); // heat map size; or dynamic
+        cellGrid = new StackPane[n][n];
+
+        double size = Math.min(600, 600);
         grid.setPrefSize(size, size);
+
         for (int r = 0; r < n; r++) {
             RowConstraints rc = new RowConstraints();
             rc.setPercentHeight(100.0 / n);
             grid.getRowConstraints().add(rc);
         }
+
         for (int c = 0; c < n; c++) {
             ColumnConstraints cc = new ColumnConstraints();
             cc.setPercentWidth(100.0 / n);
             grid.getColumnConstraints().add(cc);
         }
+
         for (int r = 0; r < n; r++) {
             for (int c = 0; c < n; c++) {
                 StackPane cell = new StackPane();
@@ -153,6 +190,7 @@ public class MainController {
                         "-fx-background-color: lightgray; -fx-border-color: gray;");
                 cell.setId("cell-"+r+"-"+c);
                 grid.add(cell, c, r);
+                cellGrid[r][c] = cell;
             }
         }
         return grid;
@@ -160,29 +198,26 @@ public class MainController {
 
     // Render board from cols array. cols[row] = col index or -1
     private void render(int[] cols) {
+        if (cellGrid == null) return;
+
         int n = cols.length;
+
         if (boardGrid == null) return;
         GridPane grid = (GridPane) boardGrid;
-        // clear all queens
-        grid.getChildren().forEach(node -> {
-            if (node instanceof StackPane) {
-                StackPane cell = (StackPane) node;
-                cell.getChildren().clear();
+
+        // 1. Clear old queens (efficiently)
+        for(int r=0; r<n; r++) {
+            for(int c=0; c<n; c++) {
+                cellGrid[r][c].getChildren().clear();
             }
-        });
+        }
         // place queens
         for (int r = 0; r < n; r++) {
             int c = cols[r];
-            if (c >= 0) {
-                int finalR = r;
-                StackPane cell = (StackPane) grid.getChildren().stream()
-                        .filter(n2 -> GridPane.getRowIndex(n2) == finalR && GridPane.getColumnIndex(n2) == c)
-                        .map(n2 -> (StackPane) n2).findFirst().orElse(null);
-                if (cell != null) {
-                    Label q = new Label("♛"); // chess queen unicode
-                    q.setStyle("-fx-font-size: 24px;");
-                    cell.getChildren().add(q);
-                }
+            if (c >= 0 && c < n) {
+                Label q = new Label("♛");
+                q.setStyle("-fx-font-size: 24px;");
+                cellGrid[r][c].getChildren().add(q);
             }
         }
     }
